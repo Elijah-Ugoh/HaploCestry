@@ -2,7 +2,10 @@
 library(shiny)
 library(dplyr)
 library(data.tree)
-library(networkD3)
+library(collapsibleTree)
+library(shinycssloaders)
+library(ggtree)
+library(tidyverse)
 
 setwd("/Users/Elijah/Documents/BINP29_Files/Population_Genetics_Project")
 
@@ -38,19 +41,41 @@ ui <- fluidPage(
   
   sidebarLayout(
     sidebarPanel(
+      # Prompt user to provide input
       textInput("haplogroup", "Enter Your Haplogroup (ISOGG Format):"),
+      # Submit BUTTON
       actionButton("submit_button", "Submit", style = "background-color: #007bff; color: #fff; border: none; margin-top: 10px;"),
+      # Reset BUTTON
       actionButton("reset_button", "Reset", style = "background-color: #dc3545; color: #fff; border: none; margin-top: 10px;"),
       br(),
+      # Diaplay reports
       uiOutput("reports")
     ),
     mainPanel(
+      # Title display
       uiOutput("haplogroup_title"),
+      # Haplogroup message display
       uiOutput("haplogroup_message"),
-      uiOutput("ancestry_tree")
+      # Display the network graph
+      collapsibleTreeOutput('ancestry_tree', height='700px') %>% withSpinner(color = "green")
     )
   )
 )
+
+generateAncestryTree <- function(haplogroup, selected_data, tree) {
+  if (!is.null(haplogroup)) {
+    node <- FindNode(tree, haplogroup)
+    if (!is.null(node)) {
+      parent_node <- ifelse(is.null(node$parent), "", node$parent$name)
+      child_nodes <- ifelse(is.null(node$children), character(0), sapply(node$children, function(x) x$name))
+      tree_data <- data.frame(name = c(haplogroup, parent_node, child_nodes))
+      links <- data.frame(source = c(haplogroup, parent_node, rep(parent_node, length(child_nodes))),
+                          target = c(parent_node, haplogroup, child_nodes))
+      #return(dendroNetwork(tree_data, linkData = links))
+    }
+  }
+  return(NULL)
+}
 
 server <- function(input, output, session) {
   
@@ -108,12 +133,12 @@ server <- function(input, output, session) {
     }
   })
   
-  
-  
   # Find the countries of the descendants of the next paternal haplogroup in the lineage
   countries_of_DNA_tested_descendants <- eventReactive(input$submit_button, {
-    #Check if the child haplogroup is not null and is found in the database
-    if (!is.null(child_haplogroup()) && child_haplogroup() %in% (selected_data$Y_haplogroup_ISOGG)) {
+    country_message <- NULL  # Initialize to NULL
+    
+    # Check if the child haplogroup is not null and is found in the database
+    if (!is.null(child_haplogroup()) && child_haplogroup() %in% selected_data$Y_haplogroup_ISOGG) {
       filtered_countries <- selected_data$Political_Entity[selected_data$Y_haplogroup_ISOGG == child_haplogroup()]
       countries <- unique(filtered_countries)
       
@@ -122,13 +147,11 @@ server <- function(input, output, session) {
         country_message <- paste(paste(countries[-length(countries)], collapse = ", "), "and", countries[length(countries)])
       } else if (length(countries) == 1) {
         country_message <- countries
-      } else if (length(countries) == 0) {
-        return(NULL)
       }
-    } else {
-      return(NULL)
+      # No need to handle length(countries) == 0 explicitly, it will return NULL by default
     }
-    return(country_message) # return list of countries
+    
+    return(country_message)  # Return list of countries or NULL
   })
   
 
@@ -184,7 +207,12 @@ server <- function(input, output, session) {
   # Generate reports
   output$reports <- renderUI({
     # Check if the input haplogroup exists in the database
-    if (!is.null(input$haplogroup) && !(input$haplogroup %in% filtered_data()$Y_haplogroup_ISOGG)) {
+    
+    if (is.null(input$haplogroup) || input$haplogroup == "") {
+      # Tell the user to enter a valid haplogroup ID
+      return(HTML( "<span style='color: red;'>", "Please provide a haplogroup ID", "</span>"))
+      
+    } else if (!is.null(input$haplogroup) && !(input$haplogroup %in% filtered_data()$Y_haplogroup_ISOGG)) {
       # Display initial report message
       return(
         tagList(
@@ -245,45 +273,40 @@ server <- function(input, output, session) {
   })
   # Show user the message header along with the input haplogroup
   output$haplogroup_title <- eventReactive(input$submit_button, {
-    HTML(paste("<span style='font-size: 25px;'><strong>", "Your Haplogroup Story:", "<span style='color: blue; font-weight: bold;'>", input$haplogroup, "</span>", "</span></strong>"))
+    if (is.null(input$submit_button) || input$haplogroup == "") {
+      # Tell the user to enter a valid haplogroup ID
+      return("")
+    } else if (!(input$submit_button %in% filtered_data()$Y_haplogroup_ISOGG)) {
+      # Display initial report message
+      return(HTML(paste("<span style='font-size: 25px;'><strong>", "Your Haplogroup Story:", "<span style='color: blue; font-weight: bold;'>", input$haplogroup, "</span>", "</span></strong>")))
+    }
   })
-  
   # Show user the additional message behind how haplogroup ancestry is obtained
   output$haplogroup_message <- eventReactive(input$submit_button, {
-    HTML("<span style='font-size: 16px; text-align: justify;'>","The Y chromosome is passed from father to son remaining mostly unaltered across generations, except for small traceable changes in the DNA. By tracing these changes, we constructed a family tree of humankind where all male lineages trace back to a single common ancestor who lived hundreds of thousands of years ago. This human tree allows us to explore lineages through time and place and to uncover the modern history of your direct paternal surname line and the ancient history of our shared ancestors.",
-         "</span>")
+    if (is.null(input$submit_button) || input$haplogroup == "") {
+      # Tell the user to enter a valid haplogroup ID
+      return("")
+    } else if (!(input$submit_button %in% filtered_data()$Y_haplogroup_ISOGG)) {
+      # Display initial report message
+      HTML("<span style='font-size: 16px; text-align: justify;'>","The Y chromosome is passed from father to son remaining mostly unaltered across generations, except for small traceable changes in the DNA. By tracing these changes, we constructed a family tree of humankind where all male lineages trace back to a single common ancestor who lived hundreds of thousands of years ago. This human tree allows us to explore lineages through time and place and to uncover the modern history of your direct paternal surname line and the ancient history of our shared ancestors.",
+           "</span>")
+    }
   })
+ 
+  # Generate ancestry tree
+  output$ancestry_tree <- renderCollapsibleTree({
+    generateAncestryTree(input$haplogroup, selected_data, tree)
+  })  
   
   # Reset button
   observeEvent(input$reset_button, {
     # Reset text input
     updateTextInput(session, "haplogroup", value = "")
     # Clear outputs in the main panel
-    # output$haplogroup_title <- renderText(NULL)
-    # output$haplogroup_message <- renderText(NULL)
-    # output$ancestry_tree <- renderText(NULL)
+    output$haplogroup_title <- renderText(NULL)
+    output$haplogroup_message <- renderText(NULL)
+    #output$ancestry_tree <- renderText(NULL)
   })
-  
-  # Generate ancestry tree
-  # output$ancestry_tree <- renderUI({
-  #   if (!is.null(input$haplogroup)) {
-  #     # Check if input haplogroup is in the tree
-  #     if (input$haplogroup %in% tree$leafName) {
-  #       # Convert to hierarchical data frame
-  #       tree_df_hierarchical <- ToDataFrameNetwork(tree, expand = TRUE)
-  #       
-  #       # Plot the tree
-  #       tree_output <- renderD3tree({
-  #         d3Tree(tree_df_hierarchical)
-  #       })
-  #       
-  #       # Wrap tree output in UI element
-  #       div(id = "ancestry_tree", style = "height: 400px; overflow-y: scroll;", tree_output)
-  #     } else {
-  #       div("No ancestral tree found for the provided haplogroup.", style = "color: red;")
-  #     }
-  #   }
-  # })
   
 }
 
