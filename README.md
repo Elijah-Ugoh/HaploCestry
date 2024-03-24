@@ -20,7 +20,7 @@ To use HaploCestry, follow these steps:
 3. Click the "Submit" button to generate your ancestry report and visualization.
 
 ## Running HaploCestry Locally
-You can also close the repository to a local difrectory and run HaploCestry from [RStudio](https://posit.co/download/rstudio-desktop/). Make sure all the app files, including tree data are saved in the same directory as the app.  
+You can also clone the repository to a local difrectory and run HaploCestry from [RStudio](https://posit.co/download/rstudio-desktop/). Make sure all the app files, including tree data are saved in the same directory as the app.  
 
 ## Requirements
 
