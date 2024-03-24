@@ -2,12 +2,8 @@
 library(shiny)
 library(dplyr)
 library(data.tree)
-library(collapsibleTree)
-library(shinycssloaders)
-library(ggtree)
 library(tidyverse)
-
-setwd("/Users/Elijah/Documents/BINP29_Files/Population_Genetics_Project")
+library(DiagrammeR)
 
 # Load data
 dat <- readxl::read_xlsx("AADR_Annotation.xlsx")
@@ -37,12 +33,12 @@ tree <- FromDataFrameNetwork(tree_file)
 
 # Define UI function
 ui <- fluidPage(
-  titlePanel("The Haplogroup Storyteller"),
+  titlePanel("HaploCestry"),
   
   sidebarLayout(
     sidebarPanel(
       # Prompt user to provide input
-      textInput("haplogroup", "Enter Your Haplogroup (ISOGG Format):"),
+      textInput("haplogroup", "Enter Your Haplogroup (ISOGG Format):", placeholder = "Please provide a haplogroup ID"),
       # Submit BUTTON
       actionButton("submit_button", "Submit", style = "background-color: #007bff; color: #fff; border: none; margin-top: 10px;"),
       # Reset BUTTON
@@ -56,32 +52,50 @@ ui <- fluidPage(
       uiOutput("haplogroup_title"),
       # Haplogroup message display
       uiOutput("haplogroup_message"),
-      # Display the network graph
-      collapsibleTreeOutput('ancestry_tree', height='700px') %>% withSpinner(color = "green")
-    )
+      # Display the ancestry tree
+      uiOutput("ancestry")
+      )
   )
 )
-
-generateAncestryTree <- function(haplogroup, selected_data, tree) {
-  if (!is.null(haplogroup)) {
-    node <- FindNode(tree, haplogroup)
-    if (!is.null(node)) {
-      parent_node <- ifelse(is.null(node$parent), "", node$parent$name)
-      child_nodes <- ifelse(is.null(node$children), character(0), sapply(node$children, function(x) x$name))
-      tree_data <- data.frame(name = c(haplogroup, parent_node, child_nodes))
-      links <- data.frame(source = c(haplogroup, parent_node, rep(parent_node, length(child_nodes))),
-                          target = c(parent_node, haplogroup, child_nodes))
-      #return(dendroNetwork(tree_data, linkData = links))
-    }
-  }
-  return(NULL)
-}
 
 server <- function(input, output, session) {
   
   # Filter data based on user input
   filtered_data <- eventReactive(input$submit_button, {
     subset(selected_data, Y_haplogroup_ISOGG == input$haplogroup)
+  })
+  #generate descendants ancestry tree
+  plot_direct_descendants <- eventReactive(input$submit_button, {
+    node <- FindNode(tree, input$haplogroup)$parent
+    if (!is.null(node)) {
+      # Create a new tree starting from the specified node
+      subtree <- Node$new(node$parent$name)
+      # Add the direct children nodes to the subtree
+      children <- node$children
+      if (length(children) > 0) {
+        for (child in children) {
+          # Add child node to the subtree
+          child_node <- subtree$AddChild(child$name)
+          # Add the next descendants under each child
+          sub_children <- child$children
+          if (length(sub_children) > 0) {
+            for (sub_child in sub_children) {
+              child_node$AddChild(sub_child$name)
+            }
+          }
+        }
+        #Add some customization
+        SetGraphStyle(subtree, rankdir = "TB")
+        SetEdgeStyle(subtree, arrowhead = "vee", color = "grey35", penwidth = 2)
+        SetNodeStyle(subtree, style = "filled,rounded", shape = "box", fillcolor = "navy", 
+                     fontname = "helvetica", tooltip = GetDefaultTooltip)
+        # Plot the subtree
+        p <- plot(subtree)
+        return(p)
+      } else {
+        cat("No direct descendants found for this Haplogroup Was found.\n")
+      }
+    }
   })
   
   # Find the parent haplogroup
@@ -206,13 +220,12 @@ server <- function(input, output, session) {
   
   # Generate reports
   output$reports <- renderUI({
-    # Check if the input haplogroup exists in the database
-    
+    req(input$submit_button)  # Require the submit button to be clicked
     if (is.null(input$haplogroup) || input$haplogroup == "") {
-      # Tell the user to enter a valid haplogroup ID
-      return(HTML( "<span style='color: red;'>", "Please provide a haplogroup ID", "</span>"))
-      
+      req(input$submit_button)  # Require the submit button to be clicked
+      return(NULL)
     } else if (!is.null(input$haplogroup) && !(input$haplogroup %in% filtered_data()$Y_haplogroup_ISOGG)) {
+      req(input$submit_button)  # Require the submit button to be clicked
       # Display initial report message
       return(
         tagList(
@@ -225,6 +238,7 @@ server <- function(input, output, session) {
         )
       )
     } else {
+      req(input$submit_button)  # Require the submit button to be clicked
       # Generate usual reports if the input haplogroup exists in the database
       reports <- list()
       #reports[[1]] <- 
@@ -273,7 +287,7 @@ server <- function(input, output, session) {
   })
   # Show user the message header along with the input haplogroup
   output$haplogroup_title <- eventReactive(input$submit_button, {
-    if (is.null(input$submit_button) || input$haplogroup == "") {
+    if (!is.null(input$submit_button) && !is.null(input$haplogroup) && !(input$haplogroup %in% filtered_data()$Y_haplogroup_ISOGG)) {
       # Tell the user to enter a valid haplogroup ID
       return("")
     } else if (!(input$submit_button %in% filtered_data()$Y_haplogroup_ISOGG)) {
@@ -283,7 +297,7 @@ server <- function(input, output, session) {
   })
   # Show user the additional message behind how haplogroup ancestry is obtained
   output$haplogroup_message <- eventReactive(input$submit_button, {
-    if (is.null(input$submit_button) || input$haplogroup == "") {
+    if (!is.null(input$submit_button) && !is.null(input$haplogroup) && !(input$haplogroup %in% filtered_data()$Y_haplogroup_ISOGG)) {
       # Tell the user to enter a valid haplogroup ID
       return("")
     } else if (!(input$submit_button %in% filtered_data()$Y_haplogroup_ISOGG)) {
@@ -294,22 +308,25 @@ server <- function(input, output, session) {
   })
  
   # Generate ancestry tree
-  output$ancestry_tree <- renderCollapsibleTree({
-    generateAncestryTree(input$haplogroup, selected_data, tree)
-  })  
+  output$ancestry <- renderUI({
+    # Define plot_direct_descendants function outside of the renderPlot
+    if (!(input$submit_button %in% filtered_data()$Y_haplogroup_ISOGG)) {
+      # Generate the ancestry plot
+      plot_direct_descendants()
+    } else if (is.null(input$submit_button) && input$haplogroup == "") {
+      # Do not generate any results
+      return(NULL)
+    }
+  })
   
   # Reset button
   observeEvent(input$reset_button, {
     # Reset text input
     updateTextInput(session, "haplogroup", value = "")
     # Clear outputs in the main panel
-    output$haplogroup_title <- renderText(NULL)
-    output$haplogroup_message <- renderText(NULL)
-    #output$ancestry_tree <- renderText(NULL)
   })
   
 }
-
 
 shinyApp(ui = ui, server = server)
 
