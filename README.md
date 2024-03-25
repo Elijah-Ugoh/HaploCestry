@@ -24,7 +24,7 @@ You can also clone the repository to a local difrectory and run HaploCestry from
 
 ```bash
 # Run the command from a terminal in a chosen directory
-git clone https://elijahugoh.shinyapps.io/HaploCestry
+git clone https://github.com/Elijah-Ugoh/HaploCestry.git
 ```
 Make sure all the app files, including tree data are saved in the same directory as the app.  
 
